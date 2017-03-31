@@ -344,14 +344,19 @@ def send_metrics(dd_metric, diff, what):
         unused_reservations += c
     for c in diff[what][1].values():
         unreserved_instances += c
-    statsd.gauge('{}.{}.unused_reservations'.format(dd_metric, what), unused_reservations)
-    print "{} unused_reservations: {}".format(what, unused_reservations)
-    statsd.gauge('{}.{}.unreserved_instances'.format(dd_metric, what), unreserved_instances)
-    print "{} unreserved_instances: {}".format(what, unreserved_instances)
-    statsd.gauge('{}.{}.qty_running_instances'.format(dd_metric, what), qty_running_instances)
-    print "{} qty_running_instances: {}".format(what, qty_running_instances)
-    statsd.gauge('{}.{}.qty_reserved_instances'.format(dd_metric, what), qty_reserved_instances)
-    print "{} qty_reserved_instances: {}".format(what, qty_reserved_instances)
+    metric = "{}.{}.unused_reservations".format(dd_metric, what.lower())
+    statsd.gauge(metric, unused_reservations)
+    print "{}: {}".format(metric, unused_reservations)
+    metric = "{}.{}.unreserved_instances".format(dd_metric, what.lower())
+    statsd.gauge(metric, unreserved_instances)
+    print "{}: {}".format(metric, unreserved_instances)
+    metric = "{}.{}.qty_running_instances".format(dd_metric, what.lower())
+    statsd.gauge(metric, qty_running_instances)
+    print "{}: {}".format(metric, qty_running_instances)
+    metric = "{}.{}.qty_reserved_instances".format(dd_metric, what.lower())
+    statsd.gauge(metric, qty_reserved_instances)
+    print "{}: {}".format(metric, qty_reserved_instances)
+
 
 if __name__ == '__main__':
     cli()
