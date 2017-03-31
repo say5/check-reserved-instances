@@ -1,9 +1,49 @@
-"""Calculate the RI's for each AWS service."""
+#!/usr/bin/env python
 
-from collections import defaultdict
+
+"""Compare instance reservations and running instances for AWS services and send metrics to DataDog"""
+import boto3
+import click
 import datetime
 
-import boto3
+from collections import defaultdict
+from datadog import initialize
+from datadog import statsd
+
+@click.command()
+@click.option('--dd-host', default='127.0.0.1', help='DataDog statd host')
+@click.option('--dd-port', default=8125, help='DataDog statd host')
+@click.option('--dd-metric', default='aws', help='DataDog metric prefix')
+@click.option('--aws-region', default='us-east-1', help='Region we get statistic for')
+@click.option('--aws-access-key', default=None, help='AWS access key')
+@click.option('--aws-access-secret', default=None, help='AWS access secret')
+@click.option('--check-ec2', default=True, help='Check EC2 instances')
+@click.option('--check-rds', default=True, help='Check RDS instances')
+@click.option('--check-elc', default=True, help='Check ElastiCache instances')
+
+
+def cli(dd_host, dd_port, dd_metric,
+        aws_region, aws_access_key, aws_access_secret,
+        check_ec2, check_rds, check_elc):
+    """
+    Compare instance reservations and running instances for AWS services.
+
+    """
+    options = {
+        'statsd_host' : dd_host,
+        'statsd_port' : dd_port
+    }
+    initialize(**options)
+    diff = {}
+    if check_ec2:
+        diff.update(calculate_ec2_ris(aws_region, aws_access_key, aws_access_secret))
+        send_metrics(dd_metric, diff, 'EC2')
+    if check_rds:
+        diff.update(calculate_rds_ris(aws_region, aws_access_key, aws_access_secret))
+        send_metrics(dd_metric, diff, 'RDS')
+    if check_elc:
+        diff.update(calculate_elc_ris(aws_region, aws_access_key, aws_access_secret))
+        send_metrics(dd_metric, diff, 'ElastiCache')
 
 
 # instance IDs/name to report with unreserved instances
@@ -26,23 +66,19 @@ def calc_expiry_time(expiry):
     return (expiry.replace(tzinfo=None) - datetime.datetime.utcnow()).days
 
 
-def calculate_ec2_ris(account):
+def calculate_ec2_ris(aws_region, aws_access_key_id, aws_secret_access_key):
     """Calculate the running/reserved instances in EC2.
 
     Args:
-        account (dict): The AWS Account to scan as loaded from the
-            configuration file.
+        aws_region, aws_access_key_id, aws_secret_access_key
 
     Returns:
         Results of running the `report_diffs` function.
     """
-    aws_access_key_id = account['aws_access_key_id']
-    aws_secret_access_key = account['aws_secret_access_key']
-    region = account['region']
 
     ec2_conn = boto3.client(
         'ec2', aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key, region_name=region)
+        aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
     paginator = ec2_conn.get_paginator('describe_instances')
     page_iterator = paginator.paginate(
         Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
@@ -98,23 +134,18 @@ def calculate_ec2_ris(account):
     return results
 
 
-def calculate_elc_ris(account):
+def calculate_elc_ris(aws_region, aws_access_key_id, aws_secret_access_key):
     """Calculate the running/reserved instances in ElastiCache.
 
     Args:
-        account (dict): The AWS Account to scan as loaded from the
-            configuration file.
+        aws_region, aws_access_key_id, aws_secret_access_key
 
     Returns:
         Results of running the `report_diffs` function.
     """
-    aws_access_key_id = account['aws_access_key_id']
-    aws_secret_access_key = account['aws_secret_access_key']
-    region = account['region']
-
     elc_conn = boto3.client(
         'elasticache', aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key, region_name=region)
+        aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
     paginator = elc_conn.get_paginator('describe_cache_clusters')
     page_iterator = paginator.paginate()
@@ -163,22 +194,19 @@ def calculate_elc_ris(account):
     return results
 
 
-def calculate_rds_ris(account):
+def calculate_rds_ris(aws_region, aws_access_key_id, aws_secret_access_key):
     """Calculate the running/reserved instances in RDS.
 
     Args:
-        account (dict): The AWS Account to scan as loaded from the
-            configuration file.
+        aws_region, aws_access_key_id, aws_secret_access_key
 
     Returns:
         Results of running the `report_diffs` function.
     """
-    aws_access_key_id = account['aws_access_key_id']
-    aws_secret_access_key = account['aws_secret_access_key']
-    region = account['region']
+
 
     rds_conn = boto3.client(
-        'rds', region_name=region, aws_access_key_id=aws_access_key_id,
+        'rds', region_name=aws_region, aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key)
 
     paginator = rds_conn.get_paginator('describe_db_instances')
@@ -302,3 +330,28 @@ def report_diffs(running_instances, reserved_instances, service):
             qty_running_instances, qty_reserved_instances
         )
     }
+
+
+def send_metrics(dd_metric, diff, what):
+    if not what in diff:
+        click.echo("WARNING: {} is not id diff, strange".format(what))
+        return
+    unused_reservations = 0
+    unreserved_instances = 0
+    qty_running_instances = diff[what][2]
+    qty_reserved_instances = diff[what][3]
+    for c in diff[what][0].values():
+        unused_reservations += c
+    for c in diff[what][1].values():
+        unreserved_instances += c
+    statsd.gauge('{}.{}.unused_reservations'.format(dd_metric, what), unused_reservations)
+    print "{} unused_reservations: {}".format(what, unused_reservations)
+    statsd.gauge('{}.{}.unreserved_instances'.format(dd_metric, what), unreserved_instances)
+    print "{} unreserved_instances: {}".format(what, unreserved_instances)
+    statsd.gauge('{}.{}.qty_running_instances'.format(dd_metric, what), qty_running_instances)
+    print "{} qty_running_instances: {}".format(what, qty_running_instances)
+    statsd.gauge('{}.{}.qty_reserved_instances'.format(dd_metric, what), qty_reserved_instances)
+    print "{} qty_reserved_instances: {}".format(what, qty_reserved_instances)
+
+if __name__ == '__main__':
+    cli()
