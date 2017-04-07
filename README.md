@@ -52,4 +52,4 @@ needed to run the reporter:
 Original project:
 https://github.com/TerbiumLabs/check-reserved-instances
 
-This version just sends metrics to DataDog.
+If you need DevOps help, check https://cupermind.com
