@@ -18,7 +18,7 @@ You need:
 3. `{{ DD_METRIC }}.{{ TYPE }}.qty_running_instances` number of running instances.
 4. `{{ DD_METRIC }}.{{ TYPE }}.qty_reserved_instances` number of reserved instances.
 
-Where `DD_METRIC` is env variable `ri` by default. And `Type` is: `ec2`, `rds`, `elasticache`.
+Where `DD_METRIC` is env variable (`ri` by default). And `Type` is: `ec2`, `rds`, `elasticache`.
 
 
 ## Required IAM Permissions
